@@ -1,2 +1,1 @@
-# notification-service
-Sends notifications for events
+"# Notification Service" 
