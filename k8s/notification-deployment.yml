@@ -1,0 +1,165 @@
+# Secret for Notification DB
+apiVersion: v1
+kind: Secret
+metadata:
+  name: notification-db-secret
+type: Opaque
+data:
+  DB_USER: bm90aWZ5dXNlcg==        # notifyuser
+  DB_PASSWORD: bm90aWZ5cGFzcw==    # notifypass
+  DB_NAME: bm90aWZ5ZGI=            # notifydb
+  DB_HOST: bm90aWZ5LWRi            # will fix below
+  DB_PORT: NTQzMg==                # 5432
+
+---
+# PVC for Notification DB
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: notification-db-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+
+---
+# Notification DB Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: notification-db
+  template:
+    metadata:
+      labels:
+        app: notification-db
+    spec:
+      containers:
+        - name: notification-db
+          image: postgres:15
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: notification-db-secret
+                  key: DB_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: notification-db-secret
+                  key: DB_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: notification-db-secret
+                  key: DB_NAME
+          volumeMounts:
+            - name: notification-db-storage
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - "$(POSTGRES_USER)"
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: notification-db-storage
+          persistentVolumeClaim:
+            claimName: notification-db-pvc
+
+---
+# Notification DB Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification-db
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5432
+  selector:
+    app: notification-db
+
+---
+# Notification Service Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: notification-service
+  template:
+    metadata:
+      labels:
+        app: notification-service
+    spec:
+      containers:
+        - name: notification-service
+          image: notification-service:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8084
+          env:
+            - name: DB_HOST
+              value: notification-db
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: notification-db-secret
+                  key: DB_PORT
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: notification-db-secret
+                  key: DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: notification-db-secret
+                  key: DB_PASSWORD
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: notification-db-secret
+                  key: DB_NAME
+            - name: SERVICE_API_KEY
+              value: "banking-shared-key"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8084
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8084
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+---
+# Notification Service ClusterIP
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification-service
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8084
+      targetPort: 8084
+  selector:
+    app: notification-service
